@@ -17,15 +17,15 @@ impl<D: Device> fmt::Debug for RxMode<D> {
 }
 
 impl<D: Device> RxMode<D> {
-    /// Relies on everything being set up by `StandbyMode::rx()`, from
-    /// which it is called
-    pub(crate) fn new(device: D) -> Self {
-        RxMode { device }
+    pub(crate) fn new(mut device: D) -> Result<Self, D::Error> {
+        device.update_config(|config| config.set_prim_rx(true))?;
+        device.ce_enable();
+
+        Ok(RxMode { device })
     }
 
-    /// Disable `CE` so that you can switch into TX mode.
     pub fn standby(self) -> StandbyMode<D> {
-        StandbyMode::from_rx_tx(self.device)
+        StandbyMode::new(self.device)
     }
 
     /// Is there any incoming data to read? Return the pipe number.

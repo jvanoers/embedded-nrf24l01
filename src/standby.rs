@@ -19,42 +19,27 @@ impl<D: Device> fmt::Debug for StandbyMode<D> {
 }
 
 impl<D: Device> StandbyMode<D> {
-    pub fn power_up(mut device: D) -> Result<Self, (D, D::Error)> {
-        match device.update_config(|config| config.set_pwr_up(true)) {
-            Ok(()) => Ok(StandbyMode { device }),
-            Err(e) => Err((device, e)),
-        }
-    }
-
-    pub(crate) fn from_rx_tx(mut device: D) -> Self {
+    pub fn new(mut device: D) -> Self {
         device.ce_disable();
+
         StandbyMode { device }
     }
 
-    /// Go into RX mode
-    pub fn rx(self) -> Result<RxMode<D>, (D, D::Error)> {
-        let mut device = self.device;
-
-        match device.update_config(|config| config.set_prim_rx(true)) {
-            Ok(()) => {
-                device.ce_enable();
-                Ok(RxMode::new(device))
-            }
-            Err(e) => Err((device, e)),
-        }
+    pub fn rx(self) -> Result<RxMode<D>, D::Error> {
+        RxMode::new(self.device)
     }
 
     /// Go into TX mode
-    pub fn tx(self) -> Result<TxMode<D>, (D, D::Error)> {
+    pub fn tx(self) -> Result<TxMode<D>, D::Error> {
+        TxMode::new(self.device)
+    }
+
+
+    pub fn power_down(self) -> Result<D, D::Error> {
         let mut device = self.device;
 
-        match device.update_config(|config| config.set_prim_rx(false)) {
-            Ok(()) => {
-                // No need to device.ce_enable(); yet
-                Ok(TxMode::new(device))
-            }
-            Err(e) => Err((device, e)),
-        }
+        device.update_config(|config| config.set_pwr_up(false))
+            .map(|_| device)
     }
 }
 

@@ -3,7 +3,12 @@ use crate::config::Configuration;
 use crate::device::Device;
 use crate::registers::{FifoStatus, ObserveTx, Status};
 use crate::standby::StandbyMode;
+
+use std::thread::sleep;
+use std::time::Duration;
 use core::fmt;
+
+use crate::errors::TransmissionError;
 
 /// Represents **TX Mode** and the associated **TX Settling** and
 /// **Standby-II** states
@@ -21,17 +26,17 @@ impl<D: Device> fmt::Debug for TxMode<D> {
 }
 
 impl<D: Device> TxMode<D> {
-    /// Relies on everything being set up by `StandbyMode::tx()`, from
-    /// which it is called
-    pub(crate) fn new(device: D) -> Self {
-        TxMode { device }
+    pub(crate) fn new(mut device: D) -> Result<Self, D::Error> {
+        device.ce_disable();
+        device.update_config(|config| config.set_prim_rx(false))?;
+
+        Ok(TxMode { device })
     }
 
-    /// Disable `CE` so that you can switch into RX mode.
     pub fn standby(mut self) -> Result<StandbyMode<D>, D::Error> {
-        self.wait_empty()?;
-
-        Ok(StandbyMode::from_rx_tx(self.device))
+        self.flush_queue()
+            .or(self.flush_tx())
+            .map(|_| StandbyMode::new(self.device))
     }
 
     /// Is TX FIFO empty?
@@ -46,47 +51,53 @@ impl<D: Device> TxMode<D> {
         Ok(fifo_status.tx_full())
     }
 
-    /// Does the TX FIFO have space?
-    pub fn can_send(&mut self) -> Result<bool, D::Error> {
-        let full = self.is_full()?;
-        Ok(!full)
-    }
-
     /// Send asynchronously
-    pub fn send(&mut self, packet: &[u8]) -> Result<(), D::Error> {
-        self.device.send_command(&WriteTxPayload::new(packet))?;
-        self.device.ce_enable();
-        Ok(())
+    pub fn enqueue(&mut self, packet: &[u8]) -> Result<Status, D::Error> {
+        // TODO Guarantee packet length is <= 32
+        // TODO Ensure queue is not full
+
+        self.device.send_command(&WriteTxPayload::new(packet))
+            .map(|(s, _)| s)
     }
 
-    /// Wait until FX FIFO is empty
-    pub fn wait_empty(&mut self) -> Result<(), D::Error> {
+    pub fn flush_queue(&mut self) -> Result<(), TransmissionError<D::Error>> {
+        // CE enabled for >10uS Initiates transmission
+        self.device.ce_enable();
+
+        sleep(Duration::new(0, 10_000));
+
         let mut empty = false;
+
         while !empty {
             let (status, fifo_status) = self.device.read_register::<FifoStatus>()?;
-            empty = fifo_status.tx_empty();
-            if !empty {
-                self.device.ce_enable();
-            }
 
-            // TX won't continue while MAX_RT is set
+            empty = fifo_status.tx_empty();
+
+            // MAX_RT: Maximum retransmissions interrupt, tranmission stops
             if status.max_rt() {
+                self.device.ce_disable();
+
                 let mut clear = Status(0);
                 // Clear TX interrupts
                 clear.set_tx_ds(true);
                 clear.set_max_rt(true);
+
                 self.device.write_register(clear)?;
+
+                self.device.ce_disable();
+
+                return Err(TransmissionError::MaximumRetriesExceeded);
             }
         }
-        // Can save power now
+
         self.device.ce_disable();
 
         Ok(())
     }
 
     pub fn observe(&mut self) -> Result<ObserveTx, D::Error> {
-        let (_, observe_tx) = self.device.read_register()?;
-        Ok(observe_tx)
+        self.device.read_register()
+            .map(|(_, observe_tx)| observe_tx)
     }
 }
 

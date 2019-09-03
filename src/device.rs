@@ -11,8 +11,8 @@ pub trait Device {
     /// Helper; the receiving during RX and sending during TX require `CE`
     /// to be low.
     fn with_ce_disabled<F, R>(&mut self, f: F) -> R
-    where
-        F: FnOnce(&mut Self) -> R,
+        where
+            F: FnOnce(&mut Self) -> R,
     {
         self.ce_disable();
         let r = f(self);
@@ -24,16 +24,18 @@ pub trait Device {
         &mut self,
         command: &C,
     ) -> Result<(Status, C::Response), Self::Error>;
+
     fn write_register<R: Register>(&mut self, register: R) -> Result<Status, Self::Error>;
+
     fn read_register<R: Register>(&mut self) -> Result<(Status, R), Self::Error>;
 
     fn update_register<Reg, F, R>(&mut self, f: F) -> Result<R, Self::Error>
-    where
-        Reg: Register + PartialEq + Clone,
-        F: FnOnce(&mut Reg) -> R,
+        where
+            Reg: Register + PartialEq + Clone,
+            F: FnOnce(&mut Reg) -> R,
     {
         // Use `update_config()` for `registers::Config`
-        assert!(Reg::addr() != 0x00);
+        assert_ne!(Reg::addr(), 0x00);
 
         let (_, old_register) = self.read_register::<Reg>()?;
         let mut register = old_register.clone();
@@ -46,6 +48,6 @@ pub trait Device {
     }
 
     fn update_config<F, R>(&mut self, f: F) -> Result<R, Self::Error>
-    where
-        F: FnOnce(&mut Config) -> R;
+        where
+            F: FnOnce(&mut Config) -> R;
 }

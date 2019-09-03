@@ -8,11 +8,10 @@ pub struct Payload {
 impl Payload {
     pub fn new(source: &[u8]) -> Self {
         let mut data = [0; 32];
+
         let len = source.len().min(data.len());
-        // for i in 0..len {
-        //     data[i] = source[i];
-        // }
         data[0..len].copy_from_slice(&source[0..len]);
+
         Payload { data, len }
     }
 
